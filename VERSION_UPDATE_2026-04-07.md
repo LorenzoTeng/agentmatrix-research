@@ -1,4 +1,4 @@
-﻿# AgentMatrix Research Core 升级记录
+# AgentMatrix Research Core 升级记录
 
 **日期**: 2026-04-07  
 **范围**: `agentmatrix-research-core` 首次拆分落地与第二阶段结构重组  
@@ -266,7 +266,7 @@ python research_core\backtest_adapter\example_gm_plan.py gm_style_rotation
 
 ### 13.3 关于桌面 PDF
 
-已定位桌面文件：C:\Users\admin\Desktop\风格轮动.pdf。
+已定位一份本地风格轮动 PDF 样本。
 
 当前自动检测结果显示该 PDF 为单页报告，且文本层极弱，直接抽取文本基本为空，说明它更接近图片化导出报告。它可以作为后续对照样本，但若要做程序化解析，优先建议获取以下任一原始数据：
 
@@ -299,11 +299,11 @@ python research_core\backtest_adapter\example_gm_plan.py gm_style_rotation
 - 生成标准化 PerformanceMetrics
 - 生成标准化 EquityCurve、TradeRecord、HoldingSnapshot
 - 生成基础 AttributionReport
-- 可将解析结果写入 data/gm_exports/33_parsed_backtest.json
+- 可将解析结果写入 `data/gm_exports/<sample>_parsed_backtest.json`
 
 ### 14.3 已完成的真实数据验证
 
-已使用桌面导出包 C:\Users\admin\Desktop\33.zip 验证，导出包包含：
+已使用一份本地 GM 导出包样本验证，导出包包含：
 
 - 持仓数据_20241231_20251231.csv
 - 净值数据_20241231_20251231.csv

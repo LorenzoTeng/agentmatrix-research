@@ -1,6 +1,7 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import json
+import os
 import sys
 import uuid
 from dataclasses import asdict
@@ -15,7 +16,12 @@ from research_core.backtest_adapter.gm_export_parser import GMExportParser
 
 
 def parse_export(zip_path: str | None = None) -> dict:
-    target = Path(zip_path).resolve() if zip_path else Path(r'C:\Users\admin\Desktop\33.zip')
+    raw_target = zip_path or os.getenv("GM_EXPORT_ZIP")
+    if not raw_target:
+        raise ValueError(
+            "Provide a GM export zip path as the first CLI argument or set GM_EXPORT_ZIP."
+        )
+    target = Path(raw_target).resolve()
     parser = GMExportParser(target)
     result = parser.parse(
         run_id=f'run_{uuid.uuid4().hex[:12]}',
