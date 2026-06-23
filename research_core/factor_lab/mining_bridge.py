@@ -168,6 +168,66 @@ class VerificationResult:
     status: str = "pending"
 
 
+def _compute_directly(panel: pd.DataFrame, parsed: ParsedExpression) -> pd.Series | None:
+    """Compute factor value directly from panel data, bypassing FACTOR_REGISTRY.
+
+    Handles time-series types (MOMENTUM, VOLATILITY, etc.) using pandas ops.
+    Cross-sectional types (Rank, IndNeutralize) → returns None.
+    """
+    w = parsed.params.get("window", 20)
+    # Ensure panel is sorted by code and date for shift operations
+    if "code" in panel.columns and "date" in panel.columns:
+        p = panel.sort_values(["code", "date"]).copy()
+    else:
+        p = panel.copy()
+
+    field_map = {
+        "open": "open", "high": "high", "low": "low",
+        "close": "close", "volume": "volume", "vwap": "vwap",
+    }
+
+    try:
+        if parsed.expr_type == ExprType.MOMENTUM:
+            close = p.groupby("code")["close"]
+            return close.pct_change(w)
+
+        elif parsed.expr_type == ExprType.VOLUME_RATIO:
+            vol = p.groupby("code")["volume"]
+            return vol.transform(lambda x: x / x.rolling(w, min_periods=w).mean())
+
+        elif parsed.expr_type == ExprType.VOLATILITY:
+            close = p.groupby("code")["close"]
+            returns = close.pct_change()
+            return returns.transform(lambda x: x.rolling(w, min_periods=w).std())
+
+        elif parsed.expr_type == ExprType.MOVING_AVERAGE:
+            close = p.groupby("code")["close"]
+            return close.transform(lambda x: x.rolling(w, min_periods=w).mean())
+
+        elif parsed.expr_type == ExprType.DELTA:
+            close = p.groupby("code")["close"]
+            return close - close.transform(lambda x: x.shift(w))
+
+        elif parsed.expr_type == ExprType.PRICE_RATIO:
+            f1, f2 = "high", "low"
+            for g in parsed.params.get("note", "").split():
+                pass  # Could extract from expression
+            return p["high"] / p["low"]
+
+        elif parsed.expr_type == ExprType.CORRELATION:
+            c = p.groupby("code")["close"]
+            v = p.groupby("code")["volume"]
+            return c.transform(lambda x: x.rolling(w).corr(v))
+
+        elif parsed.expr_type == ExprType.CROSS_SECTIONAL:
+            return None  # Needs full market cross-section
+
+    except Exception:
+        return None
+
+    return None
+
+
 def batch_verify(
     expressions: list[str],
     panel: pd.DataFrame,
@@ -210,20 +270,23 @@ def batch_verify(
         computed_count, finite_count, finite_ratio = 0, 0, 0.0
         status = "PASS"
 
-        if compute_fn and mapping:
+        if mapping:
             try:
-                result_frame = compute_fn(panel, [name])
-                factor_cols = [c for c in result_frame.columns if c not in ("date", "code")]
-                if factor_cols:
-                    values = result_frame[factor_cols[0]]
+                values = _compute_directly(panel, parsed)
+                if values is not None:
                     computed_count = len(values)
-                    finite_vals = values.dropna().replace([float("inf"), float("-inf")], None)
-                    finite_count = int(finite_vals.dropna().count())
+                    finite_count = int(values.dropna().replace(
+                        [float("inf"), float("-inf")], None).dropna().count())
                     finite_ratio = finite_count / max(computed_count, 1)
-                    if finite_count == 0 and computed_count > 0:
-                        status = "PENDING_GM"
-                    elif finite_ratio < 0.8:
+                    # Threshold: expect window-size warmup rows per stock
+                    w = parsed.params.get("window", 10)
+                    min_ratio = max(0.3, 1.0 - w / max(computed_count, 1) * panel["code"].nunique()) - 0.001
+                    if finite_count == 0:
                         status = "FAIL"
+                    elif finite_ratio < min_ratio:
+                        status = "FAIL"
+                else:
+                    status = "FAIL"
             except Exception:
                 status = "FAIL"
 
