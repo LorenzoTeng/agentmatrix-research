@@ -1,8 +1,8 @@
-"""因子挖掘反馈闭环实验 — ai_factors 入库版本
+"""因子挖掘反馈闭环实验 — 双库入库版本
 
-DeepSeek 生成 → bridge 检查 → Qlib IC 评估 → ai_factors 入库
+DeepSeek生成 → bridge检查 → IC评估 → ai_factors (价格) 或 jq_gm (基本面) 入库
 
-Usage: PYTHONPATH=. python research_core/factor_lab/scripts/mining_loop_experiment.py
+Usage: DEEPSEEK_API_KEY=sk-xxx PYTHONPATH=. python mining_loop_experiment.py
 """
 import sys, os
 from pathlib import Path
@@ -11,7 +11,7 @@ import numpy as np, pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
 from research_core.factor_lab.mining_bridge import (
-    batch_verify, feedback_to_prompt, expression_to_spec,
+    batch_verify, feedback_to_prompt, expression_to_spec, parse_expression,
 )
 
 
@@ -28,11 +28,8 @@ def make_panel(n_dates=60, n_codes=20, seed=42):
 
 
 def llm_generate(theme, feedback="", provider="deepseek"):
-    """Generate via LLM, fall back to DEFAULT_EXPRESSIONS."""
-    os.environ.setdefault("DEEPSEEK_API_KEY", "sk-fcb" + "c141d67bc494f8c4bc85316a03f3f")
     try:
-        from research_core.qlib_lab.auto_factor_miner import AIFactorMiner
-        from research_core.qlib_lab.auto_factor_miner import DEFAULT_EXPRESSIONS
+        from research_core.qlib_lab.auto_factor_miner import AIFactorMiner, DEFAULT_EXPRESSIONS
         from research_core.qlib_lab.factor_miner import QlibFactorLab
         miner = AIFactorMiner(QlibFactorLab())
         result = miner.propose_candidates(theme=theme, count=5, provider=provider, feedback=feedback)
@@ -46,6 +43,7 @@ def llm_generate(theme, feedback="", provider="deepseek"):
 
 
 def run_qlib_ic(candidates, start="2010-01-01", end="2019-12-31"):
+    """Qlib IC for ai_factors (price/technical) candidates."""
     try:
         from research_core.qlib_lab.factor_miner import QlibFactorLab
         from research_core.qlib_lab.runtime import QlibWorkspaceConfig
@@ -59,43 +57,44 @@ def run_qlib_ic(candidates, start="2010-01-01", end="2019-12-31"):
                 )
                 results.append({"name": c["name"], "ic_mean": r["top_metrics"]["ic_mean"], "icir": r["top_metrics"]["icir"]})
             except Exception:
-                results.append({"name": c["name"], "ic_mean": 0.0, "error": "failed"})
+                results.append({"name": c["name"], "ic_mean": 0.0})
         return results
     except Exception:
         return None
 
 
-def register_to_ai_factors(candidates):
-    """Register passing factors into ai_factors library."""
-    from research_core.factor_lab.libraries.ai_factors import register_spec
-    from contracts.factor_research import FactorResearchSpec
-
+def register_factors(candidates):
+    """Register passing factors to correct library (ai_factors or jq_gm)."""
     registered = []
     for c in candidates:
-        parsed = None
-        for p in range(13):  # try parse
-            from research_core.factor_lab.mining_bridge import parse_expression
-            parsed = parse_expression(c["expression"])
-            break
+        parsed = parse_expression(c["expression"])
         if parsed is None:
             continue
         spec_dict = expression_to_spec(parsed, c["name"])
-        if spec_dict:
-            spec = FactorResearchSpec(**spec_dict)
-            register_spec(spec)
-            registered.append(c["name"])
+        if spec_dict is None:
+            continue
+
+        from contracts.factor_research import FactorResearchSpec
+        spec = FactorResearchSpec(**spec_dict)
+
+        if spec.library == "ai_factors":
+            from research_core.factor_lab.libraries.ai_factors import register_spec
+        else:
+            from research_core.factor_lab.libraries.jq_gm.specs import register_spec
+
+        register_spec(spec)
+        registered.append(f"{c['name']} ({spec.library})")
     return registered
 
 
 def run():
     panel = make_panel()
     theme = "中盘股动量确认 + 换手率异常识别"
-    print(f"Panel: {panel['date'].nunique()}d x {panel['code'].nunique()}c\n")
+    print(f"Panel: {panel['date'].nunique()}d x {panel['code'].nunique()}c")
 
     # Round 1
-    print(f"=== Round 1: {theme} ===")
+    print(f"\n=== Round 1: {theme} ===")
     r1 = llm_generate(theme)
-    print(f"Candidates ({len(r1)}):")
     for c in r1:
         print(f"  {c['name']}: {c['expression']}")
 
@@ -109,7 +108,6 @@ def run():
     # Round 2 (with feedback)
     print(f"\n=== Round 2: {theme} (with feedback) ===")
     r2 = llm_generate(theme, feedback=fb)
-    print(f"Candidates ({len(r2)}):")
     for c in r2:
         print(f"  {c['name']}: {c['expression']}")
 
@@ -119,21 +117,20 @@ def run():
         ptype = r.parsed.expr_type.name if r.parsed else "-"
         print(f"  {r.status:12s} {r2[i]['name']:35s} {ptype}")
 
-    # Qlib IC
+    # Qlib IC (price/technical only)
     print(f"\n=== Qlib IC (2010-2019, CSI300) ===")
     ic = run_qlib_ic(r2)
     if ic:
-        passed = [item for item in ic if item.get("ic_mean", 0) > 0.01]
         for item in sorted(ic, key=lambda x: x.get("ic_mean", 0), reverse=True):
             mark = "+" if item.get("ic_mean", 0) > 0.01 else "-"
             print(f"  {mark} {item['name']:30s} IC={item.get('ic_mean',0):+.4f}  ICIR={item.get('icir',0):+.3f}")
+
         # Register passing factors
+        passed = [c for c in r2 if any(p["name"] == c["name"] and p.get("ic_mean", 0) > 0.01 for p in ic)]
         if passed:
-            registered = register_to_ai_factors([c for c in r2 if c["name"] in {p["name"] for p in passed}])
+            registered = register_factors(passed)
             if registered:
-                print(f"\n  Registered to ai_factors: {registered}")
-                from research_core.factor_lab.libraries.ai_factors import AI_FACTORS_IMPLEMENTED
-                print(f"  ai_factors total: {len(AI_FACTORS_IMPLEMENTED)}")
+                print(f"\n  Registered: {registered}")
     else:
         print("  Skipped — Qlib data not ready")
 
