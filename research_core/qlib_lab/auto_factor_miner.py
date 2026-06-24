@@ -90,8 +90,15 @@ class AIFactorMiner:
         return prompt
 
     def _parse_candidates(self, payload: str) -> list[FactorMiningCandidate]:
+        # Strip markdown code fences (DeepSeek, Qwen, etc. wrap JSON in ```json ... ```)
+        text = payload.strip()
+        if text.startswith("```"):
+            text = text.split("\n", 1)[-1] if "\n" in text else text[3:]
+            if text.endswith("```"):
+                text = text[:-3]
+            text = text.strip()
         try:
-            raw = json.loads(payload)
+            raw = json.loads(text)
         except json.JSONDecodeError:
             return DEFAULT_EXPRESSIONS
         if not isinstance(raw, list):
