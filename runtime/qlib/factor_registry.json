@@ -133,5 +133,35 @@
     },
     "created_at": "2026-06-24T03:10:07Z",
     "updated_at": "2026-06-24T03:10:07Z"
+  },
+  {
+    "factor_id": "c5d3f20581897fc7",
+    "name": "test_rev_5",
+    "expression": "Ref($close, 5) / $close - 1",
+    "description": "5d reversal",
+    "source": "test",
+    "author": "test",
+    "tags": [],
+    "parameters": {},
+    "metadata": {
+      "registered_at": "2026-06-24T05:03:55Z"
+    },
+    "created_at": "2026-06-24T05:03:55Z",
+    "updated_at": "2026-06-24T05:03:55Z"
+  },
+  {
+    "factor_id": "9fb3033625839ff9",
+    "name": "test_rev_20",
+    "expression": "Ref($close, 20) / $close - 1",
+    "description": "20d reversal",
+    "source": "test",
+    "author": "test",
+    "tags": [],
+    "parameters": {},
+    "metadata": {
+      "registered_at": "2026-06-24T05:04:09Z"
+    },
+    "created_at": "2026-06-24T05:04:09Z",
+    "updated_at": "2026-06-24T05:04:09Z"
   }
 ]

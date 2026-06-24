@@ -64,6 +64,26 @@ def build_parser() -> argparse.ArgumentParser:
     backtest_parser.add_argument("--horizon", type=int, default=5)
     backtest_parser.add_argument("--long-short", action="store_true")
 
+    compare_parser = subparsers.add_parser("compare-factors", help="Compare multiple factors: correlation matrix + IC decay")
+    compare_parser.add_argument("--factor-ids", nargs="+", required=True, help="Factor IDs to compare")
+    compare_parser.add_argument("--start", default="2010-01-01")
+    compare_parser.add_argument("--end", default="2019-12-31")
+    compare_parser.add_argument("--mode", default="correlation", choices=["correlation", "ic_decay", "full"],
+                                help="Comparison mode")
+
+    redundancy_parser = subparsers.add_parser("check-redundancy", help="Check if a factor is redundant with existing ones")
+    redundancy_parser.add_argument("--factor-id", required=True, help="New factor ID to check")
+    redundancy_parser.add_argument("--existing-ids", nargs="+", required=True, help="Existing factor IDs")
+    redundancy_parser.add_argument("--threshold", type=float, default=0.7, help="Correlation threshold")
+    redundancy_parser.add_argument("--start", default="2010-01-01")
+    redundancy_parser.add_argument("--end", default="2019-12-31")
+
+    cluster_parser = subparsers.add_parser("cluster-factors", help="Cluster factors by value correlation")
+    cluster_parser.add_argument("--factor-ids", nargs="+", required=True, help="Factor IDs to cluster")
+    cluster_parser.add_argument("--n-clusters", type=int, default=5)
+    cluster_parser.add_argument("--start", default="2010-01-01")
+    cluster_parser.add_argument("--end", default="2019-12-31")
+
     alpha158_template_parser = subparsers.add_parser("alpha158-template", help="Export an Alpha158 starter workflow template")
     alpha158_template_parser.add_argument("--output")
 
@@ -147,20 +167,37 @@ def main() -> None:
         if not args.factor_id and not args.factor_expression:
             raise ValueError("backtest requires --factor-id or --factor-expression")
         result = run_factor_backtest(
-            lab,
-            run_id=uuid.uuid4().hex[:12],
-            strategy_id=args.factor_id or "adhoc_factor_strategy",
-            strategy_version="v1",
-            benchmark=config.benchmark,
-            start_time=args.start,
-            end_time=args.end,
-            factor_id=args.factor_id,
-            factor_expression=args.factor_expression,
-            top_k=args.top_k,
-            horizon=args.horizon,
-            long_short=args.long_short,
+            lab, run_id=uuid.uuid4().hex[:12],
+            strategy_id=args.factor_id or "adhoc_factor_strategy", strategy_version="v1",
+            benchmark=config.benchmark, start_time=args.start, end_time=args.end,
+            factor_id=args.factor_id, factor_expression=args.factor_expression,
+            top_k=args.top_k, horizon=args.horizon, long_short=args.long_short,
         )
         print(json.dumps(asdict(result), ensure_ascii=False, indent=2, default=_json_default))
+        return
+
+    if args.command == "compare-factors":
+        from research_core.qlib_lab.factor_compare import pairwise_correlation, ic_decay_curve
+        payload = {}
+        if args.mode in ("correlation", "full"):
+            corr = pairwise_correlation(args.factor_ids, args.start, args.end)
+            payload["correlation_matrix"] = corr.to_dict()
+        if args.mode in ("ic_decay", "full"):
+            decay = ic_decay_curve(args.factor_ids, start=args.start, end=args.end)
+            payload["ic_decay"] = decay.to_dict()
+        print(json.dumps(payload, ensure_ascii=False, indent=2, default=_json_default))
+        return
+
+    if args.command == "check-redundancy":
+        from research_core.qlib_lab.factor_compare import find_redundant
+        result = find_redundant(args.factor_id, args.existing_ids, args.threshold, args.start, args.end)
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return
+
+    if args.command == "cluster-factors":
+        from research_core.qlib_lab.factor_compare import factor_cluster
+        result = factor_cluster(args.factor_ids, args.n_clusters, args.start, args.end)
+        print(json.dumps(result, ensure_ascii=False, indent=2))
         return
 
     if args.command == "alpha158-template":
