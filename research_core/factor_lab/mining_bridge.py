@@ -1,13 +1,10 @@
 """
-Mining Bridge: Qlib expressions → jq_gm factor Specs
+Mining Bridge: Qlib expressions → structural verification.
 
-Bridges the gap between AI-generated Qlib factor expressions and the
-GM-based jq_gm factor validation pipeline.
-
-Three core interfaces:
-  1. parse_expression(expr) → ParsedExpression or None
-  2. expression_to_spec(parsed, name) → FactorResearchSpec
-  3. batch_verify(specs, panel) → dict[str, VerificationResult]
+Checks whether an AI-generated Qlib expression can be parsed, mapped to
+a known factor type, and potentially bridged to jq_gm.  Does NOT attempt
+real GM computation — that requires registering the factor first via
+expression_to_spec() → jq_gm library → compute_jq_gm_factors().
 
 Design document: docs/mining_bridge_design.md
 """
@@ -17,7 +14,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from enum import Enum, auto
-from typing import Any, Optional
+from typing import Any
 
 import pandas as pd
 
@@ -47,40 +44,23 @@ class ParsedExpression:
     params: dict[str, Any] = field(default_factory=dict)
 
 
-@dataclass
-class SubExpression:
-    expr_type: ExprType
-    params: dict[str, Any] = field(default_factory=dict)
-
-
 _PATTERNS: list[tuple[str, ExprType, str]] = [
-    # Momentum: Ref($close, N) / $close - 1
     (r'^Ref\(\$(close),\s*(\d+)\)\s*/\s*\$\1\s*-\s*1$',  ExprType.MOMENTUM, "momentum"),
     (r'^\$(close)\s*/\s*Ref\(\$\1,\s*(\d+)\)\s*-\s*1$',  ExprType.MOMENTUM, "momentum-alt"),
-    # Volume ratio
     (r'^\$volume\s*/\s*Mean\(\$volume,\s*(\d+)\)$',      ExprType.VOLUME_RATIO, "volume"),
-    # Volatility
     (r'^Std\(\$(close),\s*(\d+)\)$',                     ExprType.VOLATILITY, "volatility"),
     (r'^Std\(.*Ref.*\$close.*,\s*(\d+)\)$',              ExprType.VOLATILITY, "vol-returns"),
-    # Moving average
     (r'^Mean\(\$(close),\s*(\d+)\)$',                     ExprType.MOVING_AVERAGE, "ma"),
-    # Price ratio
     (r'^\$(high)\s*/\s*\$low$',                          ExprType.PRICE_RATIO, "ratio-hl"),
     (r'^\$(open)\s*/\s*\$close$',                        ExprType.PRICE_RATIO, "ratio-oc"),
-    # Correlation
     (r'^Corr\(\$(\w+),\s*\$(\w+),\s*(\d+)\)$',           ExprType.CORRELATION, "corr"),
-    # Delta
     (r'^\$(close)\s*-\s*Ref\(\$\1,\s*(\d+)\)$',           ExprType.DELTA, "delta"),
-    # Cross-sectional ops — always unmappable
     (r'Rank\(|IndNeutralize\(|Group\(',                  ExprType.CROSS_SECTIONAL, "cs"),
-    # ── Compound expressions ──
-    # Momentum * log(volume_ratio): ($close / Ref($close, N) - 1) * Log(...)
+    # Compound expressions
     (r'^\(\$(close)\s*/\s*Ref\(\$\1,\s*(\d+)\)\s*-\s*1\)\s*\*\s*Log\(.*\)$',
      ExprType.MOMENTUM, "compound-momentum-vol"),
-    # Amplitude * momentum: (($high-$low)/$close) * ($close/Ref($close,N)-1)
-    (r'^\(\(\$(high)\s*-\s*\$(low)\)\s*/\s*\$(close)\)\s*\*\s*\(.*Ref.*\)$',
+    (r'^\(\(\$(high)\s*-\s*\$low\)\s*/\s*\$close\)\s*\*\s*\(.*Ref.*\)$',
      ExprType.MOMENTUM, "compound-amplitude-momentum"),
-    # Simple arithmetic with Ref: $(X) * Ref($(Y), N) etc
     (r'^.*Ref\(\$(\w+),\s*(\d+)\).*$',                   ExprType.MOMENTUM, "has-ref"),
 ]
 
@@ -193,61 +173,48 @@ class VerificationResult:
 
 
 def _compute_directly(panel: pd.DataFrame, parsed: ParsedExpression) -> pd.Series | None:
-    """Compute factor value directly from panel data, bypassing FACTOR_REGISTRY.
+    """Compute factor value from panel data using pandas ops.
 
-    Handles time-series types (MOMENTUM, VOLATILITY, etc.) using pandas ops.
-    Cross-sectional types (Rank, IndNeutralize) → returns None.
+    Diagnostic only — does NOT use the real GM SDK.  Used to check whether
+    a parsed expression can produce non-trivial values, but never determines
+    PASS/FAIL status.
     """
     w = parsed.params.get("window", 20)
-    # Ensure panel is sorted by code and date for shift operations
     if "code" in panel.columns and "date" in panel.columns:
         p = panel.sort_values(["code", "date"]).copy()
     else:
         p = panel.copy()
 
-    field_map = {
-        "open": "open", "high": "high", "low": "low",
-        "close": "close", "volume": "volume", "vwap": "vwap",
-    }
-
     try:
         if parsed.expr_type == ExprType.MOMENTUM:
-            close = p.groupby("code")["close"]
-            return close.pct_change(w)
+            return p.groupby("code")["close"].pct_change(w)
 
-        elif parsed.expr_type in (ExprType.VOLUME_RATIO,):
-            vol = p.groupby("code")["volume"]
-            return vol.transform(lambda x: x / x.rolling(w, min_periods=w).mean())
+        elif parsed.expr_type == ExprType.VOLUME_RATIO:
+            return p.groupby("code")["volume"].transform(
+                lambda x: x / x.rolling(w, min_periods=w).mean())
 
         elif parsed.expr_type == ExprType.VOLATILITY:
-            close = p.groupby("code")["close"]
-            returns = close.pct_change()
+            returns = p.groupby("code")["close"].pct_change()
             return returns.transform(lambda x: x.rolling(w, min_periods=w).std())
 
         elif parsed.expr_type == ExprType.MOVING_AVERAGE:
-            close = p.groupby("code")["close"]
-            return close.transform(lambda x: x.rolling(w, min_periods=w).mean())
+            return p.groupby("code")["close"].transform(
+                lambda x: x.rolling(w, min_periods=w).mean())
 
         elif parsed.expr_type == ExprType.DELTA:
-            close = p.groupby("code")["close"]
-            return close.transform(lambda x: x.diff(w))
+            return p.groupby("code")["close"].transform(lambda x: x.diff(w))
 
         elif parsed.expr_type == ExprType.PRICE_RATIO:
-            f1, f2 = "high", "low"
-            for g in parsed.params.get("note", "").split():
-                pass  # Could extract from expression
             return p["high"] / p["low"]
 
         elif parsed.expr_type == ExprType.CORRELATION:
-            # rolling.corr(other) returns a Series per group
             def _rolling_corr(grp: pd.DataFrame, w: int):
                 return grp["high"].rolling(w).corr(grp["low"])
             return p.groupby("code", group_keys=False).apply(
-                lambda g: _rolling_corr(g, w)
-            )
+                lambda g: _rolling_corr(g, w))
 
         elif parsed.expr_type == ExprType.CROSS_SECTIONAL:
-            return None  # Needs full market cross-section
+            return None
 
     except Exception:
         return None
@@ -258,31 +225,32 @@ def _compute_directly(panel: pd.DataFrame, parsed: ParsedExpression) -> pd.Serie
 def batch_verify(
     expressions: list[str],
     panel: pd.DataFrame,
-    *,
-    compute_fn=None,
-    benchmark_factors: dict[str, pd.Series] | None = None,
 ) -> list[VerificationResult]:
-    if compute_fn is None:
-        try:
-            from research_core.factor_lab.libraries.jq_gm.factors import \
-                compute_jq_gm_factors
-            compute_fn = compute_jq_gm_factors
-        except ImportError:
-            pass
+    """Structural check on AI-generated expressions.  Does NOT call GM SDK.
 
+    Statuses:
+      PARSED     — expressible in known pattern, has mapping to GM route
+      BROKEN     — known pattern but _compute_directly produced no values
+      PENDING_JQ — needs cross-sectional data (Rank/IndNeutralize/Group/Cut)
+      NC         — cannot parse or unsupported pattern
+
+    Real GM verification requires registering the factor first:
+      expression → expression_to_spec() → jq_gm → compute_jq_gm_factors()
+    """
     results: list[VerificationResult] = []
     for expr in expressions:
-        mappable, result = is_mappable(expr)
-        if not mappable and result:
-            reason, pending = result
-            status = "PENDING_JQ" if pending == PendingReason.JQ_SOURCE else "NC"
+        # ── Unmappable check ──
+        mappable, reason = is_mappable(expr)
+        if not mappable and reason:
+            status = "PENDING_JQ" if reason[1] == PendingReason.JQ_SOURCE else "NC"
             results.append(VerificationResult(
                 expression=expr, parsed=None,
-                mappable=False, unmappable_reason=result, pending_reason=pending,
-                status=status,
+                mappable=False, unmappable_reason=reason,
+                pending_reason=reason[1], status=status,
             ))
             continue
 
+        # ── Parse check ──
         parsed = parse_expression(expr)
         if parsed is None:
             results.append(VerificationResult(
@@ -292,42 +260,24 @@ def batch_verify(
             ))
             continue
 
+        # ── Mapping check ──
         mapping = _MAPPING_TABLE.get(parsed.expr_type)
-        name = f"ai_{parsed.expr_type.name.lower()}_{parsed.params.get('window', 0)}"
         computed_count, finite_count, finite_ratio = 0, 0, 0.0
-        status = "PENDING_GM"
 
         if mapping:
-            # ── Try real jq_gm compute first ──
-            if compute_fn is not None:
-                try:
-                    real_values = compute_fn(panel, [name])
-                    if real_values is not None and name in real_values.columns:
-                        vals = real_values[name]
-                        computed_count = len(vals)
-                        finite_count = int(vals.dropna().replace(
-                            [float("inf"), float("-inf")], None).dropna().count())
-                        finite_ratio = finite_count / max(computed_count, 1)
-                        if finite_count > 0 and finite_ratio >= 0.3:
-                            status = "PASS"
-                        else:
-                            status = "FAIL"
-                except Exception:
-                    pass
+            # Diagnostic: can pandas compute this locally?
+            try:
+                values = _compute_directly(panel, parsed)
+                if values is not None:
+                    computed_count = len(values)
+                    finite_count = int(values.dropna().replace(
+                        [float("inf"), float("-inf")], None).dropna().count())
+                    finite_ratio = finite_count / max(computed_count, 1)
+            except Exception:
+                pass
 
-            # ── Fallback: _compute_directly for diagnostics only ──
-            if status == "PENDING_GM":
-                try:
-                    values = _compute_directly(panel, parsed)
-                    if values is not None:
-                        computed_count = len(values)
-                        finite_count = int(values.dropna().replace(
-                            [float("inf"), float("-inf")], None).dropna().count())
-                        finite_ratio = finite_count / max(computed_count, 1)
-                except Exception:
-                    pass
+            status = "BROKEN" if (computed_count > 0 and finite_count == 0) else "PARSED"
         else:
-            # No mapping → unsupported expression type
             status = "NC"
 
         results.append(VerificationResult(
@@ -340,13 +290,47 @@ def batch_verify(
     return results
 
 
+def expression_to_spec(
+    parsed: ParsedExpression,
+    name: str,
+) -> dict[str, Any] | None:
+    """Convert a parsed expression to a FactorResearchSpec template.
+
+    Returns a dict ready to be passed to FactorResearchSpec(**kw).
+    Does NOT register the spec — caller must add it to specs.py.
+    """
+    mapping = _MAPPING_TABLE.get(parsed.expr_type)
+    if mapping is None:
+        return None
+
+    w = parsed.params.get("window", 20)
+    return {
+        "factor_name": name,
+        "library": "jq_gm",
+        "version": "v2026.06",
+        "display_name": f"AI_{name}",
+        "formula": mapping.formula_template.format(
+            window=w, field1="close", field2="volume",
+            field="{field}", field1_="{field1}", field2_="{field2}",
+        ),
+        "description": f"AI-generated {parsed.expr_type.name} factor, window={w}",
+        "required_fields": ["close", "volume"] if parsed.expr_type in (
+            ExprType.VOLUME_RATIO, ExprType.CORRELATION) else ["close"],
+        "tags": ["ai-generated", parsed.expr_type.name.lower()],
+        "metadata": {
+            "gm_field": mapping.route,
+            "gm_fields": mapping.base_factor.format(window=w),
+            "source_expression": parsed.raw,
+            "bridge_mapping": mapping.base_factor,
+        },
+    }
+
+
 def feedback_to_miner(results: list[VerificationResult]) -> dict[str, Any]:
-    passed = [r for r in results if r.status == "PASS"]
-    failed = [r for r in results if r.status == "FAIL"]
+    parsed = [r for r in results if r.status == "PARSED"]
+    broken = [r for r in results if r.status == "BROKEN"]
     pending_jq = [r for r in results if r.status == "PENDING_JQ"]
-    pending_gm = [r for r in results if r.status == "PENDING_GM"]
     nc = [r for r in results if r.status == "NC"]
-    unknown = [r for r in results if r.status == "UNKNOWN"]
 
     avoid_patterns: list[str] = []
     for r in nc:
@@ -360,12 +344,12 @@ def feedback_to_miner(results: list[VerificationResult]) -> dict[str, Any]:
 
     return {
         "batch_summary": {
-            "total": len(results), "passed": len(passed),
-            "failed": len(failed), "pending_jq": len(pending_jq),
-            "pending_gm": len(pending_gm), "nc": len(nc), "unknown": len(unknown),
+            "total": len(results), "parsed": len(parsed),
+            "broken": len(broken), "pending_jq": len(pending_jq),
+            "nc": len(nc),
         },
         "successful_patterns": [
-            r.parsed.expr_type.name if r.parsed else "unknown" for r in passed
+            r.parsed.expr_type.name if r.parsed else "unknown" for r in parsed
         ],
         "pending_jq": pending_patterns,
         "avoid_patterns": avoid_patterns,
@@ -378,37 +362,28 @@ def feedback_to_miner(results: list[VerificationResult]) -> dict[str, Any]:
 
 
 def feedback_to_prompt(results: list[VerificationResult]) -> str:
-    """Convert verification results to natural-language feedback for auto-mine.
-
-    Returns a compact prompt fragment that can be injected into the LLM's
-    system prompt for the next iteration.  Only includes actionable
-    information — patterns to avoid and patterns that work.
-    """
+    """Convert verification results to natural-language feedback for auto-mine."""
     feedback = feedback_to_miner(results)
     stats = feedback["batch_summary"]
     lines: list[str] = []
 
-    # Round summary
     lines.append(
         f"Previous round: {stats['total']} candidates → "
-        + f"{stats['passed']} PASS, {stats['failed']} FAIL, "
-        + f"{stats['pending_jq']} JQ-only, {stats['nc']} unparseable."
+        f"{stats['parsed']} structurally valid, {stats['broken']} broken, "
+        f"{stats['pending_jq']} JQ-only, {stats['nc']} unparseable."
     )
 
-    # Successful patterns to encourage
     if feedback["successful_patterns"]:
         lines.append(
-            "Patterns that passed verification: "
+            "Patterns that passed structural check: "
             + ", ".join(set(feedback["successful_patterns"])) + "."
         )
 
-    # Patterns to avoid
     if feedback["avoid_patterns"]:
         lines.append("DO NOT generate these — they failed verification:")
         for p in feedback["avoid_patterns"][:8]:
             lines.append(f"  - {p}")
 
-    # Cross-sectional — label as JQ-required, not useless
     if feedback["pending_jq"]:
         lines.append(
             "These need cross-sectional data (JQ engine, not GM single-stock):"
@@ -417,7 +392,5 @@ def feedback_to_prompt(results: list[VerificationResult]) -> str:
             lines.append(f"  - {p}")
         lines.append("You may still generate these if JQ engine is available.")
 
-    # Core guidance
     lines.append(feedback["suggestion"])
-
     return "\n".join(lines)

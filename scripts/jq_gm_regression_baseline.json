@@ -1,52 +1,51 @@
 {
   "_meta": {
-    "description": "Deterministic regression baseline. Detects code changes, NOT correctness.",
-    "note": "PENDING_GM means stub mode (no GM SDK). On VM with GM SDK, these should be PASS.",
+    "description": "Structural regression baseline. Detects code changes, NOT correctness.",
     "seed": 42,
     "n_dates": 60,
     "n_codes": 20
   },
   "factors": {
     "Ref($close, 5) / $close - 1": {
-      "status": "FAIL",
-      "finite_count": 0,
-      "finite_ratio": 0.0,
+      "status": "PARSED",
+      "finite_count": 1100,
+      "finite_ratio": 0.916667,
       "parsed_type": "MOMENTUM"
     },
     "Ref($close, 20) / $close - 1": {
-      "status": "FAIL",
-      "finite_count": 0,
-      "finite_ratio": 0.0,
+      "status": "PARSED",
+      "finite_count": 800,
+      "finite_ratio": 0.666667,
       "parsed_type": "MOMENTUM"
     },
     "$volume / Mean($volume, 10)": {
-      "status": "FAIL",
-      "finite_count": 0,
-      "finite_ratio": 0.0,
+      "status": "PARSED",
+      "finite_count": 1020,
+      "finite_ratio": 0.85,
       "parsed_type": "VOLUME_RATIO"
     },
     "Std(Ref($close, 1) / $close, 10)": {
-      "status": "FAIL",
-      "finite_count": 0,
-      "finite_ratio": 0.0,
+      "status": "PARSED",
+      "finite_count": 1000,
+      "finite_ratio": 0.833333,
       "parsed_type": "VOLATILITY"
     },
     "Mean($close, 20)": {
-      "status": "FAIL",
-      "finite_count": 0,
-      "finite_ratio": 0.0,
+      "status": "PARSED",
+      "finite_count": 820,
+      "finite_ratio": 0.683333,
       "parsed_type": "MOVING_AVERAGE"
     },
     "$high / $low": {
-      "status": "FAIL",
-      "finite_count": 0,
-      "finite_ratio": 0.0,
+      "status": "PARSED",
+      "finite_count": 1200,
+      "finite_ratio": 1.0,
       "parsed_type": "PRICE_RATIO"
     },
     "$close - Ref($close, 10)": {
-      "status": "FAIL",
-      "finite_count": 0,
-      "finite_ratio": 0.0,
+      "status": "PARSED",
+      "finite_count": 1000,
+      "finite_ratio": 0.833333,
       "parsed_type": "DELTA"
     }
   }
