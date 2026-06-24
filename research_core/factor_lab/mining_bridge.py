@@ -263,13 +263,18 @@ def batch_verify(
         # ── Unmappable check ──
         mappable, reason = is_mappable(expr)
         if not mappable and reason:
-            status = "PENDING_JQ" if reason[1] == PendingReason.JQ_SOURCE else "NC"
-            results.append(VerificationResult(
-                expression=expr, parsed=None,
-                mappable=False, unmappable_reason=reason,
-                pending_reason=reason[1], status=status,
-            ))
-            continue
+            _, pending = reason
+            if pending == PendingReason.JQ_SOURCE:
+                # Cross-sectional — needs Qlib.  Valid factor, different engine.
+                # Route to ai_factors with note, can compute via Qlib.
+                pass  # fall through to parse + route
+            else:
+                results.append(VerificationResult(
+                    expression=expr, parsed=None,
+                    mappable=False, unmappable_reason=reason,
+                    pending_reason=pending, status="NC",
+                ))
+                continue
 
         # ── Parse check ──
         parsed = parse_expression(expr)
@@ -302,8 +307,8 @@ def batch_verify(
                 pass
 
             status = "BROKEN" if (computed_count > 0 and finite_count == 0) else "PARSED"
-        elif parsed.expr_type == ExprType.UNKNOWN:
-            # Unrecognised but has Qlib operators — pass through, let Qlib handle it
+        elif parsed.expr_type in (ExprType.UNKNOWN, ExprType.CROSS_SECTIONAL):
+            # Unrecognised or cross-sectional — pass through, let Qlib handle it
             status = "PARSED"
         else:
             status = "NC"
