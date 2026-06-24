@@ -100,6 +100,15 @@ def _has_qlib_operators(expr: str) -> bool:
     return bool(_QLIB_OPERATORS.search(expr))
 
 
+def _has_gm_fields(expr: str) -> bool:
+    """Check if expression references GM API field names (net_profit_ttm, etc)."""
+    try:
+        from research_core.factor_lab.libraries.jq_gm.gm_field_reference import GM_FIELD_NAMES
+        return any(field in expr for field in GM_FIELD_NAMES)
+    except ImportError:
+        return False
+
+
 @dataclass
 class FactorMapping:
     route: str
@@ -329,33 +338,47 @@ def expression_to_spec(
 ) -> dict[str, Any] | None:
     """Convert a parsed expression to a FactorResearchSpec template.
 
-    Returns a dict ready to be passed to FactorResearchSpec(**kw).
-    Does NOT register the spec — caller must add it to specs.py.
+    Routes to ai_factors (price/technical) or jq_gm (fundamental/GM fields).
     """
     mapping = _MAPPING_TABLE.get(parsed.expr_type)
-    if mapping is None:
+    if mapping is None and parsed.expr_type not in (ExprType.UNKNOWN, ExprType.CROSS_SECTIONAL):
         return None
 
+    # Route: GM field names → jq_gm, otherwise → ai_factors
+    has_gm = _has_gm_fields(parsed.raw)
+    library = "jq_gm" if has_gm else "ai_factors"
+
     w = parsed.params.get("window", 20)
-    return {
+    spec = {
         "factor_name": name,
-        "library": "ai_factors",
+        "library": library,
         "version": "v2026.06",
         "display_name": f"AI_{name}",
-        "formula": mapping.formula_template.format(
-            window=w, field1="close", field2="volume",
-            field="{field}", field1_="{field1}", field2_="{field2}",
-        ),
-        "description": f"AI-generated {parsed.expr_type.name} factor, window={w}",
-        "required_fields": ["close", "volume"] if parsed.expr_type in (
-            ExprType.VOLUME_RATIO, ExprType.CORRELATION) else ["close"],
+        "required_fields": ["close"],
         "tags": ["ai-generated", parsed.expr_type.name.lower()],
         "metadata": {
             "source_expression": parsed.raw,
             "expr_type": parsed.expr_type.name,
-            "library": "ai_factors",
+            "library": library,
         },
     }
+
+    if mapping:
+        spec["formula"] = mapping.formula_template.format(
+            window=w, field1="close", field2="volume",
+            field="{field}", field1_="{field1}", field2_="{field2}",
+        )
+        spec["description"] = f"AI-generated {parsed.expr_type.name} factor, window={w}"
+        spec["required_fields"] = ["close", "volume"] if parsed.expr_type in (
+            ExprType.VOLUME_RATIO, ExprType.CORRELATION) else ["close"]
+        if has_gm:
+            spec["metadata"]["gm_field"] = mapping.route
+            spec["metadata"]["gm_fields"] = mapping.base_factor.format(window=w)
+    else:
+        spec["formula"] = parsed.raw
+        spec["description"] = f"AI-generated factor: {parsed.raw}"
+
+    return spec
 
 
 def feedback_to_miner(results: list[VerificationResult]) -> dict[str, Any]:

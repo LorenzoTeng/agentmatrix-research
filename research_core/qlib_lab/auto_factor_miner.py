@@ -76,14 +76,23 @@ class AIFactorMiner:
     def _build_prompt(self, theme: str, count: int, feedback: str = "") -> str:
         prompt = (
             "You are generating testable qlib factor expressions for A-share research.\n"
-            "Return strict JSON as a list. Each element must include keys: "
-            "name, expression, description, rationale, tags.\n"
-            "Use qlib expression syntax and keep each expression concise.\n"
-            "IMPORTANT: Use $close $open $high $low $volume $vwap (with $ prefix).\n"
-            "Use Ref($close, 20) with positive lookback.  No negative offsets.\n"
-            "Prefer time-series patterns: Ref, Mean, Std, Corr.\n"
-            "Avoid: Rank, IndNeutralize, Group, Cut, custom functions.\n"
+            "Return strict JSON as a list with keys: name, expression, description, rationale, tags.\n\n"
+            "For price/technical factors, use: $close $open $high $low $volume $vwap\n"
+            "With operators: Ref($close, 20), Mean(...), Std(...), Corr(...).\n"
+            "Use Ref($close, 20) with positive lookback. No negative offsets.\n"
+            "Avoid: Rank, IndNeutralize, Group, Cut (cross-sectional ops).\n\n"
+            "For fundamental factors, use GM API field names directly:\n"
         )
+        # Append GM field reference
+        try:
+            from research_core.factor_lab.libraries.jq_gm.gm_field_reference import GM_FIELD_REFERENCE
+            fields = [f"{k} -> {v}" for k, v in sorted(GM_FIELD_REFERENCE.items())]
+            prompt += "  " + "\n  ".join(fields[:50]) + "\n"
+            if len(fields) > 50:
+                prompt += f"  ... and {len(fields)-50} more fields\n"
+        except ImportError:
+            pass
+        prompt += "\nExamples: 'net_profit_ttm / total_owner_equities', 'roe_ttm * (1 - pb)'\n"
         if feedback:
             prompt += f"\n=== Feedback from previous iteration ===\n{feedback}\n=== End feedback ===\n"
         prompt += f"\nResearch theme: {theme}\nNumber of candidates: {count}"
