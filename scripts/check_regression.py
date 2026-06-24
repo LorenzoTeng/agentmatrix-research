@@ -3,16 +3,16 @@
 
 === TWO PATHS ===
 
-Path A (stub — Mac / CI):
+Path A (stub — no GM SDK):
   Uses mining_bridge.batch_verify() on auto-generated expression set covering
   all 7 mappable pattern types with multiple window parameters.
   Baseline: scripts/jq_gm_regression_baseline_stub.json
   Detects: changes in bridge parsing/computation logic.
   Does NOT verify: numerical correctness of GM factor values.
 
-Path B (GM — Windows VM with GM SDK):
+Path B (GM — with GM SDK):
   Uses gm_factor_lib.calc_factors() on ALL registered jq_gm factors.
-  Baseline: scripts/jq_gm_regression_baseline_gm.json (generated on VM).
+  Baseline: scripts/jq_gm_regression_baseline_gm.json.
   Detects: changes in GM factor computation output (code or API behaviour).
   Requires: GM SDK token (argv[1]), gm_factor_lib on sys.path.
 
@@ -25,13 +25,13 @@ Auto-detection: tries 'from gm_factor_lib import calc_factors'.
 
 === Usage ===
 
-  # Path A (Mac / CI):
+  # Path A (no GM SDK):
   python scripts/check_regression.py
 
   # Path A — regenerate stub baseline:
   python scripts/check_regression.py --generate
 
-  # Path B (VM):
+  # Path B (GM SDK):
   python scripts/check_regression.py <GM_TOKEN>
 
   # Path B — regenerate GM baseline on VM:
@@ -259,7 +259,7 @@ def main() -> int:
 
         if not baseline_path.exists():
             print(f"ERROR: no GM baseline at {baseline_path}")
-            print("Run with --generate on VM to create it.")
+            print("Run with --generate to create it.")
             return 1
 
         baseline = json.loads(baseline_path.read_text())

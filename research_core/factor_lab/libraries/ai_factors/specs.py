@@ -2,7 +2,7 @@
 
 Unlike jq_gm (which requires GM SDK for financial statement data),
 ai_factors computes everything from OHLCV panel data using pandas.
-No external API needed — works in CI and on Mac.
+No external API needed.
 
 Factors are registered at runtime via expression_to_spec() from
 mining_bridge.  The spec list grows as LLM-generated factors pass

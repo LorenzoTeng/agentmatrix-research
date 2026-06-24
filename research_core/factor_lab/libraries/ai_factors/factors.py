@@ -1,7 +1,7 @@
 """AI factor compute engine — OHLCV panel data, no external SDK needed.
 
 Computes AI-generated price/technical factors directly from pandas.
-Works on Mac, CI, and VM without GM SDK.
+Works anywhere without GM SDK.
 
 Two modes:
   1. compute_ai_factors(panel, factor_names) — factor names → lookup specs → compute

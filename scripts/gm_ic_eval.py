@@ -1,6 +1,6 @@
-"""VM-side IC evaluation for fundamental factors using GM SDK.
+"""GM SDK IC evaluation for fundamental factors using GM SDK.
 
-Usage: python vm_ic_eval.py <TOKEN> <factor_name>
+Usage: python gm_ic_eval.py <TOKEN> <factor_name>
 Computes factor via GM SDK, evaluates IC against price returns.
 """
 import sys, numpy as np, pandas as pd
@@ -64,7 +64,7 @@ def evaluate(token, factor_name, start="2020-01-01", end="2024-12-31"):
 
 if __name__ == "__main__":
     if len(sys.argv) < 3:
-        print("Usage: python vm_ic_eval.py <TOKEN> <factor_name>")
+        print("Usage: python gm_ic_eval.py <TOKEN> <factor_name>")
         sys.exit(1)
     token = sys.argv[1]
     r = evaluate(token, sys.argv[2])

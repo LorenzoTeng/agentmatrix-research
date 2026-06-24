@@ -1,4 +1,4 @@
-"""VM-side regression check — DEPRECATED, merged into check_regression.py Path B.
+"""GM SDK regression check — DEPRECATED, merged into check_regression.py Path B.
 
 This file is kept for reference.  Use check_regression.py instead:
   python scripts/check_regression.py <GM_TOKEN>           # check
