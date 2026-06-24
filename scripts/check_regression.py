@@ -4,16 +4,20 @@
 === TWO PATHS ===
 
 Path A (stub — Mac / CI):
-  Uses mining_bridge.batch_verify() to check expression parsing stability.
+  Uses mining_bridge.batch_verify() on auto-generated expression set covering
+  all 7 mappable pattern types with multiple window parameters.
   Baseline: scripts/jq_gm_regression_baseline_stub.json
   Detects: changes in bridge parsing/computation logic.
   Does NOT verify: numerical correctness of GM factor values.
 
 Path B (GM — Windows VM with GM SDK):
-  Uses gm_factor_lib.calc_factors() to compute REAL factor values via GM API.
+  Uses gm_factor_lib.calc_factors() on ALL registered jq_gm factors.
   Baseline: scripts/jq_gm_regression_baseline_gm.json (generated on VM).
   Detects: changes in GM factor computation output (code or API behaviour).
   Requires: GM SDK token (argv[1]), gm_factor_lib on sys.path.
+
+New factors/expressions are automatically included — baseline is regenerated
+from the actual registered factor list / pattern table, not a hardcoded list.
 
 Auto-detection: tries 'from gm_factor_lib import calc_factors'.
   Succeeds → Path B (real GM).
@@ -24,10 +28,13 @@ Auto-detection: tries 'from gm_factor_lib import calc_factors'.
   # Path A (Mac / CI):
   python scripts/check_regression.py
 
+  # Path A — regenerate stub baseline:
+  python scripts/check_regression.py --generate
+
   # Path B (VM):
   python scripts/check_regression.py <GM_TOKEN>
 
-  # Regenerate baseline (Path B only):
+  # Path B — regenerate GM baseline on VM:
   python scripts/check_regression.py <GM_TOKEN> --generate
 
 Returns exit code 0 if no regression, 1 if regression detected.
@@ -47,7 +54,6 @@ BASELINE_STUB = SCRIPT_DIR / "jq_gm_regression_baseline_stub.json"
 BASELINE_GM   = SCRIPT_DIR / "jq_gm_regression_baseline_gm.json"
 N_DATES = 60
 N_CODES = 20
-N_STOCKS_VM = 20
 SEED = 42
 REGRESSION_THRESHOLD = 0.05
 
@@ -62,8 +68,36 @@ except ImportError:
 
 
 # ═══════════════════════════════════════════════════════════════
-# Path A: Stub mode (Mac / CI)
+# Path A: Stub mode — auto-generate expressions from pattern table
 # ═══════════════════════════════════════════════════════════════
+
+# Expression templates keyed by mappable ExprType, with window params.
+# Each template is a callable (window) -> expression string.
+# CROSS_SECTIONAL excluded (always unmappable, no meaningful regression check).
+_PATH_A_TEMPLATES: list[tuple[str, list[int]]] = [
+    # (expression_template, [window_values])
+    ("Ref($close, {w}) / $close - 1",         [5, 10, 20, 60]),        # MOMENTUM
+    ("$close / Ref($close, {w}) - 1",         [5, 20]),                # MOMENTUM-alt
+    ("$volume / Mean($volume, {w})",          [5, 10, 20]),            # VOLUME_RATIO
+    ("Std($close, {w})",                     [5, 10, 20]),            # VOLATILITY
+    ("Std(Ref($close, 1) / $close, {w})",     [5, 10, 20]),            # VOLATILITY-returns
+    ("Mean($close, {w})",                    [5, 10, 20, 60]),         # MOVING_AVERAGE
+    ("$high / $low",                          []),                      # PRICE_RATIO (no window)
+    ("Corr($close, $volume, {w})",            [10, 20]),               # CORRELATION
+    ("$close - Ref($close, {w})",             [5, 10, 20]),            # DELTA
+]
+
+
+def _path_a_generate_expressions() -> list[str]:
+    exprs = []
+    for template, windows in _PATH_A_TEMPLATES:
+        if not windows:
+            exprs.append(template)
+        else:
+            for w in windows:
+                exprs.append(template.format(w=w))
+    return exprs
+
 
 def _gen_demo_panel() -> pd.DataFrame:
     rng = np.random.default_rng(SEED)
@@ -81,15 +115,7 @@ def _gen_demo_panel() -> pd.DataFrame:
 
 def _path_a_compute() -> dict:
     from research_core.factor_lab.mining_bridge import batch_verify
-    exprs = [
-        "Ref($close, 5) / $close - 1",
-        "Ref($close, 20) / $close - 1",
-        "$volume / Mean($volume, 10)",
-        "Std(Ref($close, 1) / $close, 10)",
-        "Mean($close, 20)",
-        "$high / $low",
-        "$close - Ref($close, 10)",
-    ]
+    exprs = _path_a_generate_expressions()
     panel = _gen_demo_panel()
     results = batch_verify(exprs, panel)
     return {
@@ -103,6 +129,7 @@ def _path_a_compute() -> dict:
 
 
 def _path_a_check(baseline: dict, current: dict) -> int:
+    """Check + detect new/missing expressions."""
     failures = 0
     for expr, bl in baseline.items():
         cur = current.get(expr)
@@ -126,21 +153,18 @@ def _path_a_check(baseline: dict, current: dict) -> int:
                 print(f"  RATIO: {expr}: {bl['finite_ratio']:.4f} -> {cur['finite_ratio']:.4f} ({c:.1%})")
                 failures += 1
                 continue
+    # Detect new expressions not in baseline
+    new = set(current.keys()) - set(baseline.keys())
+    if new:
+        print(f"  NEW expressions ({len(new)}): {sorted(new)[:5]}...")
+        print(f"  Run --generate to update baseline.")
+        failures += len(new)
     return failures
 
 
 # ═══════════════════════════════════════════════════════════════
-# Path B: Real GM SDK (VM)
+# Path B: Real GM SDK — auto-generate from FACTOR_REGISTRY
 # ═══════════════════════════════════════════════════════════════
-
-_PATH_B_FACTORS = [
-    "market_cap", "pe_ttm", "pb_ratio", "roe_ttm", "roa",
-    "gross_profit_margin", "net_profit_margin",
-    "momentum_120d", "momentum_252d", "volatility_120d",
-    "total_assets_growth_rate", "net_profit_growth_per_share",
-    "KDJ_K", "KDJ_D", "RSI",
-    "net_operate_cash_flow", "bps",
-]
 
 _PATH_B_STOCKS = [
     "SHSE.600519", "SHSE.600036", "SHSE.601318", "SHSE.600900", "SHSE.601166",
@@ -150,10 +174,29 @@ _PATH_B_STOCKS = [
 ]
 
 
+def _path_b_get_factors() -> list[str]:
+    """Read all registered jq_gm factor names from the actual registry."""
+    try:
+        # Prefer AgentMatrix JQ_GM_IMPLEMENTED_FACTORS if importable
+        from research_core.factor_lab.libraries.jq_gm import JQ_GM_IMPLEMENTED_FACTORS
+        return sorted(JQ_GM_IMPLEMENTED_FACTORS)
+    except ImportError:
+        pass
+    try:
+        # Fallback: read from gm_factor_lib FACTOR_REGISTRY
+        from gm_factor_lib import FACTOR_REGISTRY
+        return sorted(FACTOR_REGISTRY.keys())
+    except ImportError:
+        pass
+    print("ERROR: cannot determine factor list. Import failed.")
+    sys.exit(2)
+
+
 def _path_b_compute(token: str) -> dict:
     _gm_set_token(token)
+    factors = _path_b_get_factors()
     result = _gm_calc(
-        securities=_PATH_B_STOCKS, factors=_PATH_B_FACTORS,
+        securities=_PATH_B_STOCKS, factors=factors,
         start_date="2025-12-31", end_date="2025-12-31",
         use_real_price=True, skip_paused=True,
     )
@@ -190,6 +233,12 @@ def _path_b_check(baseline: dict, current: dict) -> int:
             print(f"  MEAN:  {fk}: {bl['mean']:.4f} -> {cur['mean']:.4f} ({mc:.1%})")
             failures += 1
             continue
+    # Detect new factors not in baseline
+    new = set(current.keys()) - set(baseline.keys())
+    if new:
+        print(f"  NEW factors ({len(new)}): {sorted(new)[:5]}...")
+        print(f"  Run --generate on VM to update baseline.")
+        failures += len(new)
     return failures
 
 
@@ -204,6 +253,7 @@ def main() -> int:
     if _GM_READY and token:
         # ── Path B: Real GM ──
         print("=== jq_gm Regression Check (Path B: GM SDK) ===")
+        print(f"Factors: {len(_path_b_get_factors())} from FACTOR_REGISTRY")
         baseline_path = BASELINE_GM
 
         if generate:
@@ -226,21 +276,32 @@ def main() -> int:
         baseline_path = BASELINE_STUB
 
         if generate:
-            print("--generate not supported in stub mode. Baseline is committed.")
+            current = _path_a_compute()
+            out = {
+                "_meta": {
+                    "description": "Auto-generated stub regression baseline.",
+                    "note": "Detects code changes, NOT correctness.",
+                    "seed": SEED, "n_dates": N_DATES, "n_codes": N_CODES,
+                    "expression_count": len(current),
+                },
+                "expressions": current,
+            }
+            baseline_path.write_text(json.dumps(out, indent=2))
+            print(f"Baseline generated: {len(current)} expressions -> {baseline_path}")
             return 0
 
         if not baseline_path.exists():
             print(f"ERROR: no stub baseline at {baseline_path}")
+            print("Run with --generate to create it.")
             return 1
 
         baseline = json.loads(baseline_path.read_text())
-        print(f"Baseline: {baseline['_meta'].get('n_dates')}d x {baseline['_meta'].get('n_codes')}c")
+        meta = baseline.get("_meta", {})
+        print(f"Baseline: {meta.get('n_dates')}d x {meta.get('n_codes')}c, "
+              f"{meta.get('expression_count', '?')} expressions")
         current_raw = _path_a_compute()
-        current = {k: v for k, v in current_raw.items() if k in baseline.get("factors", baseline)}
-        if "factors" in baseline:
-            bl_factors = baseline["factors"]
-        else:
-            bl_factors = baseline
+        current = current_raw
+        bl_factors = baseline.get("expressions", baseline.get("factors", baseline))
         failures = _path_a_check(bl_factors, current)
 
     if failures == 0:

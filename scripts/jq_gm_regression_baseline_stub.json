@@ -1,52 +1,137 @@
 {
   "_meta": {
-    "description": "Structural regression baseline. Detects code changes, NOT correctness.",
+    "description": "Auto-generated stub regression baseline.",
+    "note": "Detects code changes, NOT correctness.",
     "seed": 42,
     "n_dates": 60,
-    "n_codes": 20
+    "n_codes": 20,
+    "expression_count": 25
   },
-  "factors": {
+  "expressions": {
     "Ref($close, 5) / $close - 1": {
       "status": "PARSED",
       "finite_count": 1100,
-      "finite_ratio": 0.916667,
-      "parsed_type": "MOMENTUM"
+      "finite_ratio": 0.916667
+    },
+    "Ref($close, 10) / $close - 1": {
+      "status": "PARSED",
+      "finite_count": 1000,
+      "finite_ratio": 0.833333
     },
     "Ref($close, 20) / $close - 1": {
       "status": "PARSED",
       "finite_count": 800,
-      "finite_ratio": 0.666667,
-      "parsed_type": "MOMENTUM"
+      "finite_ratio": 0.666667
+    },
+    "Ref($close, 60) / $close - 1": {
+      "status": "BROKEN",
+      "finite_count": 0,
+      "finite_ratio": 0.0
+    },
+    "$close / Ref($close, 5) - 1": {
+      "status": "PARSED",
+      "finite_count": 1100,
+      "finite_ratio": 0.916667
+    },
+    "$close / Ref($close, 20) - 1": {
+      "status": "PARSED",
+      "finite_count": 800,
+      "finite_ratio": 0.666667
+    },
+    "$volume / Mean($volume, 5)": {
+      "status": "PARSED",
+      "finite_count": 1120,
+      "finite_ratio": 0.933333
     },
     "$volume / Mean($volume, 10)": {
       "status": "PARSED",
       "finite_count": 1020,
-      "finite_ratio": 0.85,
-      "parsed_type": "VOLUME_RATIO"
+      "finite_ratio": 0.85
+    },
+    "$volume / Mean($volume, 20)": {
+      "status": "PARSED",
+      "finite_count": 820,
+      "finite_ratio": 0.683333
+    },
+    "Std($close, 5)": {
+      "status": "PARSED",
+      "finite_count": 1100,
+      "finite_ratio": 0.916667
+    },
+    "Std($close, 10)": {
+      "status": "PARSED",
+      "finite_count": 1000,
+      "finite_ratio": 0.833333
+    },
+    "Std($close, 20)": {
+      "status": "PARSED",
+      "finite_count": 800,
+      "finite_ratio": 0.666667
+    },
+    "Std(Ref($close, 1) / $close, 5)": {
+      "status": "PARSED",
+      "finite_count": 1100,
+      "finite_ratio": 0.916667
     },
     "Std(Ref($close, 1) / $close, 10)": {
       "status": "PARSED",
       "finite_count": 1000,
-      "finite_ratio": 0.833333,
-      "parsed_type": "VOLATILITY"
+      "finite_ratio": 0.833333
+    },
+    "Std(Ref($close, 1) / $close, 20)": {
+      "status": "PARSED",
+      "finite_count": 800,
+      "finite_ratio": 0.666667
+    },
+    "Mean($close, 5)": {
+      "status": "PARSED",
+      "finite_count": 1120,
+      "finite_ratio": 0.933333
+    },
+    "Mean($close, 10)": {
+      "status": "PARSED",
+      "finite_count": 1020,
+      "finite_ratio": 0.85
     },
     "Mean($close, 20)": {
       "status": "PARSED",
       "finite_count": 820,
-      "finite_ratio": 0.683333,
-      "parsed_type": "MOVING_AVERAGE"
+      "finite_ratio": 0.683333
+    },
+    "Mean($close, 60)": {
+      "status": "PARSED",
+      "finite_count": 20,
+      "finite_ratio": 0.016667
     },
     "$high / $low": {
       "status": "PARSED",
       "finite_count": 1200,
-      "finite_ratio": 1.0,
-      "parsed_type": "PRICE_RATIO"
+      "finite_ratio": 1.0
+    },
+    "Corr($close, $volume, 10)": {
+      "status": "PARSED",
+      "finite_count": 1020,
+      "finite_ratio": 0.85
+    },
+    "Corr($close, $volume, 20)": {
+      "status": "PARSED",
+      "finite_count": 820,
+      "finite_ratio": 0.683333
+    },
+    "$close - Ref($close, 5)": {
+      "status": "PARSED",
+      "finite_count": 1100,
+      "finite_ratio": 0.916667
     },
     "$close - Ref($close, 10)": {
       "status": "PARSED",
       "finite_count": 1000,
-      "finite_ratio": 0.833333,
-      "parsed_type": "DELTA"
+      "finite_ratio": 0.833333
+    },
+    "$close - Ref($close, 20)": {
+      "status": "PARSED",
+      "finite_count": 800,
+      "finite_ratio": 0.666667
     }
   }
 }
