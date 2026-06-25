@@ -4,10 +4,10 @@
 === TWO PATHS ===
 
 Path A (stub — no GM SDK):
-  Uses mining_bridge.batch_verify() on auto-generated expression set covering
-  all 7 mappable pattern types with multiple window parameters.
+  Uses ai_factors.compute_expressions() on auto-generated expression set covering
+  9 mappable pattern types with multiple window parameters.
   Baseline: scripts/jq_gm_regression_baseline_stub.json
-  Detects: changes in bridge parsing/computation logic.
+  Detects: changes in ai_factors expression computation logic.
   Does NOT verify: numerical correctness of GM factor values.
 
 Path B (GM — with GM SDK):
