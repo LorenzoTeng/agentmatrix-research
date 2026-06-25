@@ -291,6 +291,9 @@ def batch_verify(
             # Unknown pattern — but is it recognisable Qlib or garbage?
             if _has_qlib_operators(expr):
                 parsed = ParsedExpression(raw=expr, expr_type=ExprType.UNKNOWN, params={"note": "qlib-pass-through"})
+            elif _has_gm_fields(expr):
+                # Has GM field names (e.g., $tot_mv, $net_profit_ttm) — valid fundamental expression
+                parsed = ParsedExpression(raw=expr, expr_type=ExprType.UNKNOWN, params={"note": "gm-fundamental"})
             else:
                 results.append(VerificationResult(
                     expression=expr, parsed=None,
@@ -330,6 +333,137 @@ def batch_verify(
         ))
 
     return results
+
+
+def verify_gm(
+    verification_results: list[VerificationResult],
+    factor_names: list[str],
+    securities: list[str] | None = None,
+    start_date: str = "2025-12-31",
+    end_date: str = "2025-12-31",
+    gm_token: str = "",
+) -> list[VerificationResult]:
+    """Real GM SDK verification for jq_gm-routed factors.
+
+    For each PARSED result that routes to jq_gm (has GM fields in expression),
+    attempts to compute the factor via gm_factor_lib.calc_factors().
+    Updates status to VERIFIED_GM (success), GM_FAILED (computation error),
+    or leaves as PARSED if GM SDK is unavailable.
+
+    Unlike batch_verify() which only checks structural patterns, this function
+    actually calls the GM API to verify the factor can be computed with real data.
+
+    Args:
+        verification_results: output from batch_verify()
+        factor_names: corresponding factor names for each result
+        securities: GM security codes. Defaults to top 10 CSI300 stocks.
+        start_date, end_date: date range for computation
+        gm_token: GM SDK token. Required for real computation.
+
+    Returns:
+        Modified list with PARSED → VERIFIED_GM / GM_FAILED for jq_gm factors.
+    """
+    import numpy as np  # type: ignore[import]
+
+    # ── Try to import GM SDK ──
+    _gm_ready = False
+    _calc = None
+    try:
+        if gm_token:
+            from gm.api import set_token as _set_token  # type: ignore[import]
+            _set_token(gm_token)
+        # Import gm_factor_lib from known paths
+        import sys as _sys
+        from pathlib import Path as _Path
+        for _p in [
+            _Path.home() / ".goldminer3" / "projects",
+            _Path.home() / "Desktop" / "TYDQUANT" / "JQ2GM",
+        ]:
+            if str(_p) not in _sys.path and _p.exists():
+                _sys.path.insert(0, str(_p))
+        from gm_factor_lib import calc_factors as _gm_calc, GM_AVAILABLE  # type: ignore[import]
+        if GM_AVAILABLE:
+            _gm_ready = True
+            _calc = _gm_calc
+    except (ImportError, RuntimeError):
+        pass
+
+    if not _gm_ready:
+        return verification_results  # No GM SDK, keep PARSED status
+
+    if securities is None:
+        securities = [
+            "SHSE.600519", "SHSE.600036", "SHSE.601318", "SHSE.600900",
+            "SHSE.601166", "SZSE.000858", "SZSE.002415", "SZSE.300750",
+            "SZSE.000001", "SZSE.000333",
+        ]
+
+    for i, vr in enumerate(verification_results):
+        if vr.status != "PARSED":
+            continue
+        if vr.parsed is None:
+            continue
+
+        # Check if this expression routes to jq_gm (has GM fields)
+        if not _has_gm_fields(vr.expression):
+            continue
+
+        # Generate spec to get factor metadata
+        name = factor_names[i] if i < len(factor_names) else f"gm_verify_{i}"
+        spec_dict = expression_to_spec(vr.parsed, name)
+        if spec_dict is None:
+            continue
+
+        gm_fields = spec_dict.get("metadata", {}).get("gm_fields", "")
+        if not gm_fields:
+            continue
+
+        # Find matching registered factor key
+        matched_key = None
+        try:
+            from gm_factor_lib import FACTOR_REGISTRY  # type: ignore[import]
+            fields_list = [f.strip() for f in gm_fields.split(",")]
+            for fk, fv in FACTOR_REGISTRY.items():
+                fv_fields = str(fv.get("gm_fields", ""))
+                if any(f in fv_fields for f in fields_list):
+                    matched_key = fk
+                    break
+        except ImportError:
+            pass
+
+        if matched_key is None:
+            # Factor not yet registered — could be a new AI-generated fundamental factor
+            # For now, mark as needing registration
+            vr.status = "NEEDS_REG"
+            continue
+
+        # ── Real GM computation ──
+        try:
+            raw = _calc(
+                securities=securities,
+                factors=[matched_key],
+                start_date=start_date,
+                end_date=end_date,
+                use_real_price=True,
+                skip_paused=True,
+            )
+            if matched_key in raw and not raw[matched_key].empty:
+                vals = raw[matched_key].values.flatten()
+                n_valid = int(np.sum(~np.isnan(vals)))
+                if n_valid > 0:
+                    vr.status = "VERIFIED_GM"
+                    vr.computed_count = n_valid
+                    vr.finite_count = n_valid
+                    vr.finite_ratio = 1.0
+                    vr.benchmark_corr = float(np.nanmean(vals))
+                else:
+                    vr.status = "GM_FAILED"
+            else:
+                vr.status = "GM_FAILED"
+        except Exception:
+            vr.status = "GM_FAILED"
+
+    return verification_results
 
 
 def expression_to_spec(

@@ -11,7 +11,7 @@ from research_core.qlib_lab.factor_miner import QlibFactorLab
 # ── Lazy bridge imports (available after PR #23 merge) ──
 try:
     from research_core.factor_lab.mining_bridge import (
-        batch_verify, feedback_to_prompt, parse_expression, expression_to_spec,
+        batch_verify, verify_gm, feedback_to_prompt, parse_expression, expression_to_spec,
     )
     _BRIDGE_READY = True
 except ImportError:
@@ -199,10 +199,15 @@ class AIFactorMiner:
             verify_results = batch_verify(
                 [c.expression for c in candidates], panel,
             )
+            # ── GM SDK verification for fundamental factors ──
+            # Upgrades PARSED → VERIFIED_GM when GM SDK is available
+            names = [c.name for c in candidates]
+            verify_results = verify_gm(verify_results, names)
+
             # Filter out NC/BROKEN candidates
             verified: list[FactorMiningCandidate] = []
             for c, vr in zip(candidates, verify_results):
-                if vr.status in ("PARSED",):
+                if vr.status in ("PARSED", "VERIFIED_GM"):
                     verified.append(c)
             if verified:
                 candidates = verified

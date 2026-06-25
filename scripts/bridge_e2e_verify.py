@@ -254,6 +254,27 @@ def main():
     print(f"\n{'='*60}")
     print("SUMMARY")
     print("=" * 60)
+
+    # ── Also run through mining_bridge.verify_gm() ──
+    print(f"\n{'='*60}")
+    print("MINING BRIDGE verify_gm()")
+    print("=" * 60)
+    try:
+        from research_core.factor_lab.mining_bridge import batch_verify as _bv, verify_gm as _vg
+        panel_fake = _make_panel()
+        exprs = [e for _, e in PRICE_CASES] + [e for _, e in FUNDAMENTAL_CASES]
+        names = [n for n, _ in PRICE_CASES] + [n for n, _ in FUNDAMENTAL_CASES]
+        vr = _bv(exprs, panel_fake)
+        vr = _vg(vr, names, securities=STOCKS, start_date=TEST_DATE, end_date=TEST_DATE, gm_token=token)
+        for r in vr:
+            icon = {"PARSED":"⚠️","VERIFIED_GM":"✓","GM_FAILED":"❌","NEEDS_REG":"📝","NC":"✗"}.get(r.status,"?")
+            print(f"  {icon} {r.expression[:50]:50s} → {r.status}")
+        verified_count = sum(1 for r in vr if r.status == "VERIFIED_GM")
+        print(f"  VERIFIED_GM: {verified_count}/{len(vr)}")
+    except ImportError as e:
+        print(f"  Cannot import mining_bridge: {e}")
+
+    # ═══ Summary ═══
     for path, name, ok, cnt in results:
         icon = "✓" if ok else "❌"
         extra = f" count={cnt}" if cnt > 0 else ""
