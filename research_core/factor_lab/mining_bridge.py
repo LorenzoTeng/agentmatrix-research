@@ -416,6 +416,11 @@ def verify_gm(
 
         gm_fields = spec_dict.get("metadata", {}).get("gm_fields", "")
         if not gm_fields:
+            # Fallback: extract GM field names from expression (e.g., $tot_mv)
+            import re as _re
+            _fields = _re.findall(r'\$(\w+)', vr.expression)
+            gm_fields = ",".join(_fields) if _fields else ""
+        if not gm_fields:
             continue
 
         # Find matching registered factor key
